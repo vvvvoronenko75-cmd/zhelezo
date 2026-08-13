@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<title>Железо — планировщик тренировок</title>
+<meta name="description" content="Планировщик силовых тренировок на месяцы вперёд: подходы, повторы и веса в килограммах. Работает без связи.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Железо">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="topbar-brand">Железо</div>
+    <div id="topbar-title">Программа</div>
+  </header>
+  <main id="screen"></main>
+  <div id="rest-timer" class="hidden">
+    <div class="rest-mid">
+      <div class="rest-top"><span class="rest-label">Отдых</span><b id="rest-count">1:30</b></div>
+      <div class="rest-bar"><div id="rest-fill"></div></div>
+    </div>
+    <button class="rest-btn" data-act="rest-add">+30&nbsp;с</button>
+    <button class="rest-btn ghost" data-act="rest-skip">Пропустить</button>
+  </div>
+  <nav id="tabbar">
+    <button class="tab active" data-tab="program"><span class="tab-ico">▤</span><span>Программа</span></button>
+    <button class="tab" data-tab="workout"><span class="tab-ico">▶</span><span>Тренировка</span></button>
+    <button class="tab" data-tab="calendar"><span class="tab-ico">▦</span><span>Календарь</span></button>
+    <button class="tab" data-tab="progress"><span class="tab-ico">◆</span><span>Прогресс</span></button>
+  </nav>
+</div>
+<div id="sheet-backdrop" class="hidden"></div>
+<div id="sheet" class="hidden"></div>
+<script src="app.js"></script>
+<script>
+/* Офлайн: файлы кладутся в кэш при первом открытии, потом приложение
+   работает в зале без связи. Обновление подхватывается при следующем запуске. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
