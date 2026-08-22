@@ -485,3 +485,7 @@ canvas { width: 100%; height: auto; display: block; }
   padding: 1px 4px; border-radius: 4px; margin-right: 5px; vertical-align: 1px;
 }
 .w-unset { color: var(--ink-3); font-weight: 600; }
+
+/* Название суперсета — две половины пары, ему нужна вторая строка */
+.ex-card.in-ss .ex-name { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
+.ex-card.in-ss .ex-name .ss-tag { white-space: nowrap; }
