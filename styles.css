@@ -492,3 +492,10 @@ canvas { width: 100%; height: auto; display: block; }
 
 /* Предложение обновить сохранённую программу */
 .upd-card { border-color: rgba(255, 122, 47, .5); background: linear-gradient(180deg, rgba(255,122,47,.07), transparent), var(--card); }
+
+/* Поштучный вид подходов */
+.set-grp.one .sg-val { font-size: 14px; }
+.sg-fold {
+  text-align: center; padding: 9px; font-size: 12px; font-weight: 700;
+  color: var(--ink-2); cursor: pointer; border-top: 1px solid var(--line);
+}

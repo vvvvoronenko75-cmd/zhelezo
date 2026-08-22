@@ -612,17 +612,28 @@ function cycleMaxR(name) {
   return m;
 }
 
-function setEditor(ei, si, s) {
-  return `
-  <div class="set-edit">
+function setEditor(ex, ei, si, s) {
+  /* Вес: у обычного упражнения один степпер, у суперсета/тройки — по степперу
+     на каждую часть, подписанному её именем. Повторы (или секунды) — общие. */
+  const wRows = s.ws
+    ? s.ws.map((wv, pi) => `
+    <div class="edit-grp">
+      <button data-act="wp-" data-e="${ei}" data-s="${si}" data-p="${pi}">−2,5</button>
+      <div class="edit-val"><b>${fmtW(wv)}</b><span>${esc((ex.parts?.[pi] || 'кг').slice(0, 14))}</span></div>
+      <button data-act="wp+" data-e="${ei}" data-s="${si}" data-p="${pi}">+2,5</button>
+    </div>`).join('')
+    : `
     <div class="edit-grp">
       <button data-act="w-" data-e="${ei}" data-s="${si}">−2,5</button>
       <div class="edit-val"><b>${fmtW(s.w)}</b><span>кг</span></div>
       <button data-act="w+" data-e="${ei}" data-s="${si}">+2,5</button>
-    </div>
+    </div>`;
+  return `
+  <div class="set-edit">
+    ${wRows}
     <div class="edit-grp">
       <button data-act="r-" data-e="${ei}" data-s="${si}">−1</button>
-      <div class="edit-val"><b>${s.r}</b><span>повт</span></div>
+      <div class="edit-val"><b>${s.r}</b><span>${isTimed(s) ? 'сек' : 'повт'}</span></div>
       <button data-act="r+" data-e="${ei}" data-s="${si}">+1</button>
     </div>
     <button class="edit-close" data-act="edit-set" data-e="${ei}" data-s="${si}">Готово</button>
@@ -677,23 +688,41 @@ function renderWorkout() {
       if (g && key(g) === key(s)) g.items.push(si);
       else grps.push({ w: s.w, ws: s.ws, r: s.r, rmax: s.rmax, unit: s.unit, items: [si] });
     });
-    const rows = grps.map(g => {
+    const expanded = state.ui.openSets === ei;
+    let rows;
+    if (expanded) {
+      /* Поштучно: своя строка у каждого подхода, тап — редактор веса и повторов
+         именно этого подхода. Правки не трогают соседние подходы и будущие дни. */
+      rows = ex.sets.map((st, si) => {
+        const editing = es && es.e === ei && es.s === si;
+        const pctS = (max && !ex.parts && st.w > 0) ? ` <span class="sg-pct">· ${Math.round(st.w / max * 100)}%</span>` : '';
+        return `
+      <div class="set-grp one${editing ? ' sedit' : ''}" data-act="edit-set" data-e="${ei}" data-s="${si}">
+        <div class="sg-main">
+          <div class="sg-val">Подход ${si + 1} · ${repsText(st)} ${wText(st)}${pctS}<span class="sg-edit">✎</span></div>
+        </div>
+        <div class="sg-checks"><button class="set-check grp${st.done ? ' done' : ''}" data-act="check" data-e="${ei}" data-s="${si}">${st.done ? '✓' : si + 1}</button></div>
+      </div>${editing ? setEditor(ex, ei, si, st) : ''}`;
+      }).join('') + `
+      <div class="sg-fold" data-act="toggle-sets" data-e="${ei}">Свернуть подходы ▴</div>`;
+    } else rows = grps.map(g => {
       const dnG = g.items.filter(si => ex.sets[si].done).length;
       const pctG = (max && !ex.parts) ? Math.round(g.w / max * 100) : 0;
       const single = g.items.length === 1;
       const si0 = g.items[0];
       const editing = single && es && es.e === ei && es.s === si0;
+      /* Тап по одиночному подходу — сразу редактор; по группе — раскрыть поштучно */
       const act = single
         ? `data-act="edit-set" data-e="${ei}" data-s="${si0}"`
-        : `data-act="edit-ex" data-e="${ei}"`;
+        : `data-act="toggle-sets" data-e="${ei}"`;
       return `
       <div class="set-grp${editing ? ' sedit' : ''}" ${act}>
         <div class="sg-main">
           <div class="sg-val">${g.items.length}×${repsText(g)} ${wText(g)}${pctG ? ` <span class="sg-pct">· ${pctG}%</span>` : ''}<span class="sg-edit">✎</span></div>
-          <div class="sg-sub">выполнено ${dnG} из ${g.items.length}</div>
+          <div class="sg-sub">выполнено ${dnG} из ${g.items.length}${single ? '' : ' · тап — подходы поштучно'}</div>
         </div>
         <div class="sg-checks">${g.items.map(si => `<button class="set-check grp${ex.sets[si].done ? ' done' : ''}" data-act="check" data-e="${ei}" data-s="${si}">${ex.sets[si].done ? '✓' : si + 1}</button>`).join('')}</div>
-      </div>${editing ? setEditor(ei, si0, ex.sets[si0]) : ''}`;
+      </div>${editing ? setEditor(ex, ei, si0, ex.sets[si0]) : ''}`;
     }).join('');
     return `
   <div class="card ex-card${ex.parts ? ' in-ss' : ''}">
@@ -1212,13 +1241,27 @@ document.addEventListener('click', e => {
   const step = 2.5;
 
   if (act === 'toggle-week') { state.ui.openWeek = state.ui.openWeek === +t.dataset.w ? -1 : +t.dataset.w; render(); }
-  else if (act === 'open-day') { state.ui.sel = { w: +t.dataset.w, d: +t.dataset.d }; state.ui.editSet = null; goTab('workout'); }
+  else if (act === 'open-day') { state.ui.sel = { w: +t.dataset.w, d: +t.dataset.d }; state.ui.editSet = null; state.ui.openSets = null; goTab('workout'); }
   else if (act === 'check') {
     /* индекс мог устареть (данные приехали из соседней вкладки) — просто перерисуемся */
     const s = day?.exercises[+t.dataset.e]?.sets[+t.dataset.s];
     if (!s) return render();
     s.done = !s.done;
     if (s.done && !dayDone(day)) startRest(day.exercises[+t.dataset.e]?.rest || 90); else if (dayDone(day)) stopRest();
+    render();
+  }
+  else if (act === 'toggle-sets') {
+    const k = +t.dataset.e;
+    state.ui.openSets = state.ui.openSets === k ? null : k;
+    state.ui.editSet = null;
+    render();
+  }
+  else if (act === 'wp+' || act === 'wp-') {
+    const st = day?.exercises[+t.dataset.e]?.sets[+t.dataset.s];
+    const pi = +t.dataset.p;
+    if (!st || !st.ws || st.ws[pi] === undefined) return render();
+    st.ws[pi] = Math.max(0, Math.min(MAX_W, st.ws[pi] + (act === 'wp+' ? step : -step)));
+    st.w = st.ws[0];   /* первый вес — «главный»: по нему проценты и рекорды */
     render();
   }
   else if (act === 'edit-set') {
