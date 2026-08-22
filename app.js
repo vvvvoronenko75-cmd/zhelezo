@@ -14,12 +14,12 @@ const repsRange = s => (s.rmax && s.rmax !== s.r) ? `${s.r}–${s.rmax}` : `${s.
 const isTimed = s => s.unit === 'sec';
 const repsText = s => isTimed(s) ? `${repsRange(s)} сек` : repsRange(s);
 /* Тоннаж считаем только там, где он имеет смысл: секунды в килограммы не переводятся */
-const setVol = s => isTimed(s) ? 0 : (s.w + (s.w2 || 0)) * s.r;
-/* У суперсета два веса: «60 / 45 кг» — по весу на каждую половину пары */
+const setVol = s => isTimed(s) ? 0 : (s.ws ? s.ws.reduce((a, b) => a + b, 0) : s.w) * s.r;
+/* У суперсета вес свой на каждую часть: «60 / 45 кг», у тройки — три числа */
 const wText = s => {
-  const two = s.w2 !== undefined;
-  if (!s.w && !s.w2) return '<span class="w-unset">· вес не задан</span>';
-  return two ? `@ ${fmtW(s.w)} / ${fmtW(s.w2)} кг` : `@ ${fmtW(s.w)} кг`;
+  const ws = s.ws || [s.w];
+  if (!ws.some(w => w > 0)) return '<span class="w-unset">· вес не задан</span>';
+  return `@ ${ws.map(fmtW).join(' / ')} кг`;
 };
 /* Схема упражнения одной строкой: «3×6–10», «3×30–40 сек» */
 const exScheme = ex => ex.sets.length ? `${ex.sets.length}×${repsText(ex.sets[0])}` : '—';
@@ -82,36 +82,45 @@ function seedProgram(weeksCount = 12, daysPerWeek = 3) {
    Суперсет — два упражнения подряд без отдыха между ними; помечены полем ss
    (общий ярлык пары). Вес нигде не задан (0): подбирается в первый заход,
    поэтому автоматической прогрессии тут нет — план повторяется неделя в неделю. */
-function programDayA(weeksCount = 12) {
+function programDayAB(weeksCount = 12) {
   const start = mondayOfCurrentWeek();
-  const plan = [
+  const planA = [
     { name: 'Приседания', sets: 3, r: 6, rmax: 10, rest: 120 },
     { name: 'Жим лёжа + Тяга к поясу', parts: ['Жим лёжа', 'Тяга к поясу'], sets: 3, r: 8, rmax: 12, rest: 90 },
     { name: 'Разгибание ног + Сгибание ног', parts: ['Разгибание ног', 'Сгибание ног'], sets: 3, r: 12, rmax: 15, rest: 60 },
     { name: 'Махи в стороны + Разведения', parts: ['Махи в стороны', 'Разведения'], sets: 3, r: 12, rmax: 15, rest: 60 },
     { name: 'Походка фермера', sets: 3, r: 30, rmax: 40, rest: 60, unit: 'sec' },
   ];
+  const planB = [
+    { name: 'Ягодичный мост + Боковые подъёмы', parts: ['Ягодичный мост', 'Боковые подъёмы'], sets: 3, r: 10, rmax: 15, rest: 90 },
+    { name: 'Свенд-жим + Горизонтальная тяга', parts: ['Свенд-жим', 'Горизонтальная тяга'], sets: 3, r: 10, rmax: 15, rest: 90 },
+    { name: 'Плечи (жим + махи + разведения)', parts: ['Жим', 'Махи', 'Разведения'], sets: 3, r: 12, rmax: 15, rest: 60 },
+    { name: 'Подъём на носки', sets: 3, r: 12, rmax: 20, rest: 60 },
+  ];
+  const days = [{ title: 'День A', offset: 0, plan: planA }, { title: 'День B', offset: 3, plan: planB }];
   const weeks = [];
   for (let w = 0; w < weeksCount; w++) {
-    const date = new Date(start);
-    date.setDate(date.getDate() + w * 7); /* понедельник каждой недели */
-    weeks.push({ days: [{
-      title: 'День A',
-      date: iso(date),
-      exercises: plan.map(e => ({
-        name: e.name,
-        rest: e.rest,
-        parts: e.parts,                 /* две половины суперсета — одна строка плана */
-        sets: Array.from({ length: e.sets }, () => {
-          const st = { w: 0, r: e.r, rmax: e.rmax, done: false };
-          if (e.unit) st.unit = e.unit;
-          if (e.parts) st.w2 = 0;       /* второй вес — для второй половины пары */
-          return st;
-        }),
-      })),
-    }] });
+    weeks.push({ days: days.map(d => {
+      const date = new Date(start);
+      date.setDate(date.getDate() + w * 7 + d.offset); /* День A — понедельник, День B — четверг */
+      return {
+        title: d.title,
+        date: iso(date),
+        exercises: d.plan.map(e => ({
+          name: e.name,
+          rest: e.rest,
+          parts: e.parts,               /* части суперсета/тройки — одна строка плана */
+          sets: Array.from({ length: e.sets }, () => {
+            const st = { w: 0, r: e.r, rmax: e.rmax, done: false };
+            if (e.unit) st.unit = e.unit;
+            if (e.parts) st.ws = e.parts.map(() => 0); /* по весу на каждую часть */
+            return st;
+          }),
+        })),
+      };
+    }) });
   }
-  return { name: 'День A (Пн)', startDate: iso(start), daysPerWeek: 1, weeks };
+  return { name: 'Дни A и B', startDate: iso(start), daysPerWeek: days.length, weeks };
 }
 
 /* ---------- Состояние ----------
@@ -126,7 +135,7 @@ let lastProgJson = JSON.stringify(state.program); /* данные на моме�
 let lastRaw = null;                               /* строка, которую мы сами последней положили в хранилище */
 
 function blankState() {
-  const s = { program: programDayA(), ui: { tab: 'program', openWeek: 0, sel: null, rest: null }, rev: Date.now() };
+  const s = { program: programDayAB(), ui: { tab: 'program', openWeek: 0, sel: null, rest: null }, rev: Date.now() };
   s.ui.sel = findUpcoming(s.program);
   return s;
 }
@@ -546,8 +555,9 @@ function renderWorkout() {
     const grps = [];
     ex.sets.forEach((s, si) => {
       const g = grps.at(-1);
-      if (g && g.w === s.w && g.w2 === s.w2 && g.r === s.r && g.rmax === s.rmax && g.unit === s.unit) g.items.push(si);
-      else grps.push({ w: s.w, w2: s.w2, r: s.r, rmax: s.rmax, unit: s.unit, items: [si] });
+      const key = s => `${s.w}|${(s.ws || []).join(',')}|${s.r}|${s.rmax}|${s.unit}`;
+      if (g && key(g) === key(s)) g.items.push(si);
+      else grps.push({ w: s.w, ws: s.ws, r: s.r, rmax: s.rmax, unit: s.unit, items: [si] });
     });
     const rows = grps.map(g => {
       const dnG = g.items.filter(si => ex.sets[si].done).length;
@@ -572,7 +582,7 @@ function renderWorkout() {
     <div class="ex-head" data-act="edit-ex" data-e="${ei}">
       <div class="ex-no${exDone ? ' ok' : ''}">${exDone ? '✓' : ei + 1}</div>
       <div class="ex-title">
-        <div class="ex-name">${ex.parts ? '<span class="ss-tag">СУПЕРСЕТ</span> ' : ''}${esc(ex.name)}</div>
+        <div class="ex-name">${ex.parts ? `<span class="ss-tag">${ex.parts.length > 2 ? 'ТРОЙКА' : 'СУПЕРСЕТ'}</span> ` : ''}${esc(ex.name)}</div>
         <div class="ex-sub">${exScheme(ex)}${ex.parts ? ' · подряд без отдыха' : (max ? ` · % — от макс. цикла ${fmtW(max)} кг` : '')}${ex.rest ? ` · отдых ${restText(ex.rest)}` : ''}</div>
       </div>
       <span class="ex-cnt${exDone ? ' ok' : ''}">${exDn}/${ex.sets.length}</span>
@@ -1007,10 +1017,8 @@ function sheetEditExercise(ei) {
       <div class="field"><label>Повторы</label><input id="f-reps" type="number" min="1" max="${MAX_R}" value="${ex.sets[0]?.r ?? 5}"></div>
       ${ex.parts ? '' : `<div class="field"><label>Вес, кг</label><input id="f-w" type="number" step="2.5" min="0" max="${MAX_W}" value="${ex.sets[0]?.w ?? 20}"></div>`}
     </div>
-    ${ex.parts ? `
-    <div class="row">
-      <div class="field"><label>${esc(ex.parts[0])}, кг</label><input id="f-w" type="number" step="2.5" min="0" max="${MAX_W}" value="${ex.sets[0]?.w ?? 0}"></div>
-      <div class="field"><label>${esc(ex.parts[1])}, кг</label><input id="f-w2" type="number" step="2.5" min="0" max="${MAX_W}" value="${ex.sets[0]?.w2 ?? 0}"></div>
+    ${ex.parts ? `<div class="row">${ex.parts.map((part, pi) => `
+      <div class="field"><label>${esc(part)}, кг</label><input id="f-w${pi}" type="number" step="2.5" min="0" max="${MAX_W}" value="${ex.sets[0]?.ws?.[pi] ?? 0}"></div>`).join('')}
     </div>` : ''}
     <div class="field check"><label><input id="f-future" type="checkbox" checked> <span>Применить и ко всем будущим «${esc(day.title)}»</span></label>
       <div class="field-hint">Меняется только то, что вы правите. Вес в будущих днях сдвигается на ту же разницу — прогрессия сохраняется. «Удалить» при включённой галке уберёт упражнение и из будущих таких дней.</div></div>
@@ -1047,18 +1055,18 @@ function sheetNewProgram() {
     <div class="muted" style="margin-bottom:10px">Текущая программа будет заменена вместе с отметками.</div>
     <div class="field"><label>Программа</label>
       <select id="f-kind">
-        <option value="dayA" selected>День A (Пн) — приседания, суперсеты, фермер</option>
+        <option value="dayA" selected>Дни A и B — суперсеты, 2 тренировки в неделю</option>
         <option value="base55">База 5×5 — линейный рост весов</option>
       </select>
     </div>
-    <div class="field"><label>Название</label><input id="f-name" value="День A (Пн)"></div>
+    <div class="field"><label>Название</label><input id="f-name" value="Дни A и B"></div>
     <div class="row">
       <div class="field"><label>Недель</label><input id="f-weeks" type="number" min="4" max="52" value="12"></div>
       <div class="field"><label>Дней в неделю</label>
         <select id="f-days"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
       </div>
     </div>
-    <div class="small" style="margin:-4px 0 10px">«Дней в неделю» действует только для «Базы 5×5»: в «Дне A» одна тренировка — понедельник.</div>
+    <div class="small" style="margin:-4px 0 10px">«Дней в неделю» действует только для «Базы 5×5»: в «Днях A и B» две тренировки — понедельник и четверг.</div>
     <button class="btn" data-act="create-program">Создать</button>`);
 }
 
@@ -1127,7 +1135,7 @@ document.addEventListener('click', e => {
     const days = clampNum($('#f-days').value, 2, 4, 3, true);
     const kind = $('#f-kind') ? $('#f-kind').value : 'base55';
     /* даты и прогрессия считаются на весь срок, а не клонированием последней недели */
-    const p = kind === 'dayA' ? programDayA(weeks) : seedProgram(weeks, days);
+    const p = kind === 'dayA' ? programDayAB(weeks) : seedProgram(weeks, days);
     p.name = name;
     state.program = p;
     state.ui.sel = findUpcoming(p); state.ui.openWeek = 0; state.ui.editSet = null;
@@ -1157,7 +1165,7 @@ function forEachFutureSameTitle(fromSel, cb) {
    чтобы линейная прогрессия не превращалась в плоскую линию. */
 function applyExChange(ex, o) {
   if (o.chName) ex.name = o.name;
-  if (!o.chSets && !o.chReps && !o.chW && !o.chW2) return;
+  if (!o.chSets && !o.chReps && !o.chW && !o.chWs) return;
   const base = ex.sets;
   const len = o.chSets ? o.sets : base.length;
   ex.sets = Array.from({ length: len }, (_, i) => {
@@ -1171,10 +1179,12 @@ function applyExChange(ex, o) {
     const out = { w, r, done: base[i] ? base[i].done : false };
     if (src.unit) out.unit = src.unit;
     if (src.rmax && src.rmax > r) out.rmax = src.rmax;
-    if (src.w2 !== undefined) {
-      out.w2 = o.chW2
-        ? (o.absolute ? o.w2 : Math.max(0, Math.min(MAX_W, src.w2 + o.dW2)))
-        : src.w2;
+    if (src.ws) {
+      out.ws = src.ws.map((sw, pi) => {
+        if (!o.chWs || !o.ws) return sw;
+        return o.absolute ? o.ws[pi] : Math.max(0, Math.min(MAX_W, sw + (o.dWs[pi] || 0)));
+      });
+      out.w = out.ws[0];   /* первый вес — «главный», по нему считаются рекорды и проценты */
     }
     return out;
   });
@@ -1221,15 +1231,23 @@ function applyExerciseEdit(ei) {
   const name = $('#f-name').value.trim() || oldName;
   const sets = clampNum($('#f-sets').value, 1, 12, oldSets, true);
   const reps = clampNum($('#f-reps').value, 1, MAX_R, oldReps, true);
-  const w = clampNum($('#f-w').value, 0, MAX_W, oldW);
-  /* У суперсета вес свой на каждую половину пары */
-  const hasW2 = !!$('#f-w2');
-  const oldW2 = target.sets[0]?.w2 ?? 0;
-  const w2 = hasW2 ? clampNum($('#f-w2').value, 0, MAX_W, oldW2) : oldW2;
+  const wEl = $('#f-w');   /* у суперсета/тройки его нет: там поля по частям */
+  const w = wEl ? clampNum(wEl.value, 0, MAX_W, oldW) : oldW;
+  /* У суперсета/тройки вес свой на каждую часть: читаем столько полей, сколько частей */
+  const oldWs = target.sets[0]?.ws;
+  let ws = null, dWs = null, chWs = false;
+  if (oldWs) {
+    ws = oldWs.map((ow, pi) => {
+      const el = $('#f-w' + pi);
+      return el ? clampNum(el.value, 0, MAX_W, ow) : ow;
+    });
+    dWs = ws.map((nw, pi) => nw - oldWs[pi]);
+    chWs = dWs.some(d => d !== 0);
+  }
   const o = {
     name, sets, reps, w, dW: w - oldW,
-    w2, dW2: w2 - oldW2, chW2: hasW2 && w2 !== oldW2,
-    chName: name !== oldName, chSets: sets !== oldSets, chReps: reps !== oldReps, chW: w !== oldW,
+    ws, dWs, chWs,
+    chName: name !== oldName, chSets: sets !== oldSets, chReps: reps !== oldReps, chW: !!wEl && w !== oldW,
   };
 
   applyExChange(target, { ...o, absolute: true });
