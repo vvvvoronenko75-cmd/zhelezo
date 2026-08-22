@@ -8,6 +8,17 @@ const MONTHS = ['января','февраля','марта','апреля','м�
 const MONTHS_NOM = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
 const fmtW = w => (Math.round(w * 100) / 100).toLocaleString('ru-RU');
+/* Подход умеет три вещи сверх «повторов»: диапазон (r..rmax), работу на время
+   (unit:'sec') и вес, который ещё не подобран (w = 0 — показываем «вес?»). */
+const repsRange = s => (s.rmax && s.rmax !== s.r) ? `${s.r}–${s.rmax}` : `${s.r}`;
+const isTimed = s => s.unit === 'sec';
+const repsText = s => isTimed(s) ? `${repsRange(s)} сек` : repsRange(s);
+/* Тоннаж считаем только там, где он имеет смысл: секунды в килограммы не переводятся */
+const setVol = s => isTimed(s) ? 0 : s.w * s.r;
+const wText = s => s.w > 0 ? `@ ${fmtW(s.w)} кг` : '<span class="w-unset">· вес не задан</span>';
+/* Схема упражнения одной строкой: «3×6–10», «3×30–40 сек» */
+const exScheme = ex => ex.sets.length ? `${ex.sets.length}×${repsText(ex.sets[0])}` : '—';
+const restText = sec => sec >= 60 && sec % 60 === 0 ? `${sec / 60} мин` : `${sec} сек`;
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const fromIso = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const fmtDate = s => { const d = fromIso(s); return `${DOW[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
@@ -61,6 +72,41 @@ function seedProgram(weeksCount = 12, daysPerWeek = 3) {
   return { name: 'База 5×5', startDate: iso(start), daysPerWeek: dayOffsets.length, weeks };
 }
 
+
+/* ---------- Готовая программа владельца: День A (понедельник) ----------
+   Суперсет — два упражнения подряд без отдыха между ними; помечены полем ss
+   (общий ярлык пары). Вес нигде не задан (0): подбирается в первый заход,
+   поэтому автоматической прогрессии тут нет — план повторяется неделя в неделю. */
+function programDayA(weeksCount = 12) {
+  const start = mondayOfCurrentWeek();
+  const plan = [
+    { name: 'Приседания',            sets: 3, r: 6,  rmax: 10, rest: 120 },
+    { name: 'Жим лёжа',              sets: 3, r: 8,  rmax: 12, rest: 90, ss: 'A' },
+    { name: 'Тяга к поясу',          sets: 3, r: 8,  rmax: 12, rest: 90, ss: 'A' },
+    { name: 'Разгибание ног',        sets: 3, r: 12, rmax: 15, rest: 60, ss: 'Б' },
+    { name: 'Сгибание ног',          sets: 3, r: 12, rmax: 15, rest: 60, ss: 'Б' },
+    { name: 'Махи в стороны',        sets: 3, r: 12, rmax: 15, rest: 60, ss: 'В' },
+    { name: 'Разведения на плечи',   sets: 3, r: 12, rmax: 15, rest: 60, ss: 'В' },
+    { name: 'Походка фермера',       sets: 3, r: 30, rmax: 40, rest: 60, unit: 'sec' },
+  ];
+  const weeks = [];
+  for (let w = 0; w < weeksCount; w++) {
+    const date = new Date(start);
+    date.setDate(date.getDate() + w * 7); /* понедельник каждой недели */
+    weeks.push({ days: [{
+      title: 'День A',
+      date: iso(date),
+      exercises: plan.map(e => ({
+        name: e.name,
+        rest: e.rest,
+        ss: e.ss,
+        sets: Array.from({ length: e.sets }, () => ({ w: 0, r: e.r, rmax: e.rmax, unit: e.unit, done: false })),
+      })),
+    }] });
+  }
+  return { name: 'День A (Пн)', startDate: iso(start), daysPerWeek: 1, weeks };
+}
+
 /* ---------- Состояние ----------
    В хранилище лежит { program, ui, rev }. rev — версия ДАННЫХ программы: растёт
    только тогда, когда сама программа изменилась. По ней вкладки понимают, чья
@@ -73,7 +119,7 @@ let lastProgJson = JSON.stringify(state.program); /* данные на моме�
 let lastRaw = null;                               /* строка, которую мы сами последней положили в хранилище */
 
 function blankState() {
-  const s = { program: seedProgram(), ui: { tab: 'program', openWeek: 0, sel: null, rest: null }, rev: Date.now() };
+  const s = { program: programDayA(), ui: { tab: 'program', openWeek: 0, sel: null, rest: null }, rev: Date.now() };
   s.ui.sel = findUpcoming(s.program);
   return s;
 }
@@ -296,7 +342,7 @@ window.addEventListener('scroll', () => { if (state.ui.tab === 'calendar') updat
 
 /* --- Программа --- */
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-const weekTonnage = w => w.days.reduce((n, d) => n + d.exercises.reduce((m, e) => m + e.sets.reduce((k, s) => k + s.w * s.r, 0), 0), 0);
+const weekTonnage = w => w.days.reduce((n, d) => n + d.exercises.reduce((m, e) => m + e.sets.reduce((k, s) => k + setVol(s), 0), 0), 0);
 const weekDoneAll = w => { const ds = w.days.filter(dayPlanned); return ds.length > 0 && ds.every(dayDone); };
 
 function weekRange(week) {
@@ -330,6 +376,8 @@ function renderProgram() {
   const curW = findUpcoming(p).w;
 
   const tons = p.weeks.map(weekTonnage);
+  /* Пока веса не подобраны, тоннаж всюду 0: график и «пик» рисовать нечем — честнее сказать это словами */
+  const noWeights = tons.every(t => t === 0);
   const loT = Math.min(...tons), hiT = Math.max(...tons);
   const firstT = tons[0] || 0, lastT = tons.at(-1) || 0;
   const delta = firstT ? Math.round((lastT - firstT) / firstT * 100) : 0;
@@ -360,12 +408,17 @@ function renderProgram() {
     <div class="meter"><div class="meter-fill" style="width:${pct}%"></div></div>
     <div class="small" style="margin-top:6px">Выполнено ${doneCnt} из ${total} тренировок (${pct}%)</div>
     <div class="prog-divider"></div>
+    ${noWeights ? `
+    <div class="label-row"><span class="mini-label">Нагрузка по неделям</span></div>
+    <div class="small" style="margin-top:6px">Веса пока не заданы. Впишите рабочий вес на первой тренировке — здесь появится нагрузка по неделям и рост за цикл.</div>
+    ` : `
     <div class="label-row">
       <span class="mini-label">Нагрузка по неделям</span>
       <span class="chip">${delta >= 0 ? '+' : ''}${delta}% за цикл</span>
     </div>
     <div class="loadbars">${bars}</div>
     <div class="loadbars-axis">${axis}</div>
+    `}
   </div>`;
 
   html += `<div class="section-label">План по неделям</div>`;
@@ -380,7 +433,7 @@ function renderProgram() {
         <div class="day-main">
           <div class="day-name">${esc(day.title)} · ${fmtDate(day.date)}</div>
           <div class="day-list">${day.exercises.length ? day.exercises.map(ex => `
-            <div class="day-ex"><span class="dx-n">${esc(ex.name)}</span><span class="dx-v">${ex.sets.length}×${ex.sets[0]?.r ?? '?'} · ${fmtW(ex.sets[0]?.w ?? 0)}&nbsp;кг</span></div>`).join('')
+            <div class="day-ex"><span class="dx-n">${ex.ss ? '<b class="ss-tag">СС</b> ' : ''}${esc(ex.name)}</span><span class="dx-v">${exScheme(ex)}${(ex.sets[0]?.w ?? 0) > 0 ? " · " + fmtW(ex.sets[0].w) + "&nbsp;кг" : ''}</span></div>`).join('')
             : `<div class="day-ex"><span class="dx-n">Нет упражнений</span><span class="dx-v">не в зачёт</span></div>`}
           </div>
         </div>
@@ -391,10 +444,10 @@ function renderProgram() {
         <div class="wk-num">${weekDoneAll(week) ? '✓' : wi + 1}</div>
         <div class="wk-main">
           <div class="wk-title">Неделя ${wi + 1}</div>
-          <div class="wk-sub">${weekRange(week)} · ${fmtW(weekTonnage(week))} кг</div>
+          <div class="wk-sub">${weekRange(week)}${weekTonnage(week) ? ` · ${fmtW(weekTonnage(week))} кг` : ''}</div>
         </div>
         <div class="wk-right">
-          <div class="wk-ton">${weekKeyLift(week)}</div>
+          <div class="wk-ton">${noWeights ? '' : weekKeyLift(week)}</div>
           <div class="wk-status">${dots}<span class="wk-cnt">${wDone}/${all}</span></div>
         </div>
         <span class="caret">${open ? '▾' : '▸'}</span>
@@ -448,7 +501,7 @@ function renderWorkout() {
   if (!day) return '<div class="card"><div class="muted">Тренировка не найдена</div></div>';
   const total = day.exercises.reduce((n, e) => n + e.sets.length, 0);
   const dn = day.exercises.reduce((n, e) => n + e.sets.filter(s => s.done).length, 0);
-  const tonnage = day.exercises.reduce((n, e) => n + e.sets.filter(s => s.done).reduce((m, s) => m + s.w * s.r, 0), 0);
+  const tonnage = day.exercises.reduce((n, e) => n + e.sets.filter(s => s.done).reduce((m, s) => m + setVol(s), 0), 0);
   const pct = total ? Math.round(dn / total * 100) : 0;
   const leftMin = Math.round((total - dn) * 2.5); // ~2,5 мин на подход с отдыхом
   const complete = total > 0 && dn === total;
@@ -486,8 +539,8 @@ function renderWorkout() {
     const grps = [];
     ex.sets.forEach((s, si) => {
       const g = grps.at(-1);
-      if (g && g.w === s.w && g.r === s.r) g.items.push(si);
-      else grps.push({ w: s.w, r: s.r, items: [si] });
+      if (g && g.w === s.w && g.r === s.r && g.rmax === s.rmax && g.unit === s.unit) g.items.push(si);
+      else grps.push({ w: s.w, r: s.r, rmax: s.rmax, unit: s.unit, items: [si] });
     });
     const rows = grps.map(g => {
       const dnG = g.items.filter(si => ex.sets[si].done).length;
@@ -501,19 +554,24 @@ function renderWorkout() {
       return `
       <div class="set-grp${editing ? ' sedit' : ''}" ${act}>
         <div class="sg-main">
-          <div class="sg-val">${g.items.length}×${g.r} @ ${fmtW(g.w)}&nbsp;кг <span class="sg-pct">· ${pctG}%</span><span class="sg-edit">✎</span></div>
+          <div class="sg-val">${g.items.length}×${repsText(g)} ${wText(g)}${pctG ? ` <span class="sg-pct">· ${pctG}%</span>` : ''}<span class="sg-edit">✎</span></div>
           <div class="sg-sub">выполнено ${dnG} из ${g.items.length}</div>
         </div>
         <div class="sg-checks">${g.items.map(si => `<button class="set-check grp${ex.sets[si].done ? ' done' : ''}" data-act="check" data-e="${ei}" data-s="${si}">${ex.sets[si].done ? '✓' : si + 1}</button>`).join('')}</div>
       </div>${editing ? setEditor(ei, si0, ex.sets[si0]) : ''}`;
     }).join('');
+    const ssPrev = ei > 0 ? day.exercises[ei - 1].ss : null;
+    const ssNext = ei + 1 < day.exercises.length ? day.exercises[ei + 1].ss : null;
+    const ssFirst = !!ex.ss && ex.ss !== ssPrev;
+    const ssLast = !!ex.ss && ex.ss !== ssNext;
     return `
-  <div class="card ex-card">
+  ${ssFirst ? `<div class="ss-label">Суперсет ${esc(ex.ss)} · подряд без отдыха</div>` : ''}
+  <div class="card ex-card${ex.ss ? ' in-ss' : ''}${ssFirst ? ' ss-first' : ''}${ssLast ? ' ss-last' : ''}">
     <div class="ex-head" data-act="edit-ex" data-e="${ei}">
       <div class="ex-no${exDone ? ' ok' : ''}">${exDone ? '✓' : ei + 1}</div>
       <div class="ex-title">
         <div class="ex-name">${esc(ex.name)}</div>
-        <div class="ex-sub">${ex.sets.length}×${ex.sets[0]?.r ?? '?'} · % — от макс. цикла ${fmtW(max)} кг</div>
+        <div class="ex-sub">${exScheme(ex)}${max ? ` · % — от макс. цикла ${fmtW(max)} кг` : ''}${ex.rest ? ` · отдых ${restText(ex.rest)}` : ''}</div>
       </div>
       <span class="ex-cnt${exDone ? ' ok' : ''}">${exDn}/${ex.sets.length}</span>
       <span class="caret">›</span>
@@ -662,7 +720,7 @@ function renderProgress() {
       e.sets.forEach(s => {
         totalSets++;
         if (s.done) {
-          dnSets++; tonnage += s.w * s.r;
+          dnSets++; tonnage += setVol(s);
           /* === undefined, а не (pr||0): собственный вес (0 кг) — тоже рекорд */
           if (pr[e.name] === undefined || pr[e.name] < s.w) { pr[e.name] = s.w; prDate[e.name] = d.date; }
           /* для собственного веса рекорд меряется повторами */
@@ -685,7 +743,7 @@ function renderProgress() {
   /* Тоннаж по неделям: план и факт */
   const planTons = p.weeks.map(weekTonnage);
   const factTons = p.weeks.map(w => w.days.reduce((n, d) =>
-    n + d.exercises.reduce((m, e) => m + e.sets.filter(s => s.done).reduce((k, s) => k + s.w * s.r, 0), 0), 0));
+    n + d.exercises.reduce((m, e) => m + e.sets.filter(s => s.done).reduce((k, s) => k + setVol(s), 0), 0), 0));
   const maxT = Math.max(1, ...planTons);
   const curW = findUpcoming(p).w;
   const tonBars = p.weeks.map((w, wi) => {
@@ -979,14 +1037,21 @@ function sheetRename() {
 function sheetNewProgram() {
   openSheet(`
     <div class="sheet-title">Новая программа</div>
-    <div class="muted" style="margin-bottom:10px">Текущая программа будет заменена. Будет создан план «База 5×5» на выбранный срок с линейным ростом весов (+2,5 кг за тренировку, становая +5 кг).</div>
-    <div class="field"><label>Название</label><input id="f-name" value="Моя программа"></div>
+    <div class="muted" style="margin-bottom:10px">Текущая программа будет заменена вместе с отметками.</div>
+    <div class="field"><label>Программа</label>
+      <select id="f-kind">
+        <option value="dayA" selected>День A (Пн) — приседания, суперсеты, фермер</option>
+        <option value="base55">База 5×5 — линейный рост весов</option>
+      </select>
+    </div>
+    <div class="field"><label>Название</label><input id="f-name" value="День A (Пн)"></div>
     <div class="row">
       <div class="field"><label>Недель</label><input id="f-weeks" type="number" min="4" max="52" value="12"></div>
       <div class="field"><label>Дней в неделю</label>
-        <select id="f-days"><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option></select>
+        <select id="f-days"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
       </div>
     </div>
+    <div class="small" style="margin:-4px 0 10px">«Дней в неделю» действует только для «Базы 5×5»: в «Дне A» одна тренировка — понедельник.</div>
     <button class="btn" data-act="create-program">Создать</button>`);
 }
 
@@ -1020,7 +1085,7 @@ document.addEventListener('click', e => {
     const s = day?.exercises[+t.dataset.e]?.sets[+t.dataset.s];
     if (!s) return render();
     s.done = !s.done;
-    if (s.done && !dayDone(day)) startRest(90); else if (dayDone(day)) stopRest();
+    if (s.done && !dayDone(day)) startRest(day.exercises[+t.dataset.e]?.rest || 90); else if (dayDone(day)) stopRest();
     render();
   }
   else if (act === 'edit-set') {
@@ -1053,7 +1118,9 @@ document.addEventListener('click', e => {
     /* clampNum, а не «+value || 12»: ноль — валидное число, его надо зажать в 4 */
     const weeks = clampNum($('#f-weeks').value, 4, 52, 12, true);
     const days = clampNum($('#f-days').value, 2, 4, 3, true);
-    const p = seedProgram(weeks, days); // даты и прогрессия считаются на весь срок
+    const kind = $('#f-kind') ? $('#f-kind').value : 'base55';
+    /* даты и прогрессия считаются на весь срок, а не клонированием последней недели */
+    const p = kind === 'dayA' ? programDayA(weeks) : seedProgram(weeks, days);
     p.name = name;
     state.program = p;
     state.ui.sel = findUpcoming(p); state.ui.openWeek = 0; state.ui.editSet = null;
@@ -1090,7 +1157,14 @@ function applyExChange(ex, o) {
     const src = base[i] || base[base.length - 1] || { w: 0, r: o.reps, done: false };
     let w = src.w;
     if (o.chW) w = o.absolute ? o.w : Math.max(0, Math.min(MAX_W, src.w + o.dW));
-    return { w, r: o.chReps ? o.reps : src.r, done: base[i] ? base[i].done : false };
+    /* Диапазон повторов и работу на время правка не съедает: если человек не менял
+       повторы, поля rmax/unit остаются как были; если менял — новое число становится
+       нижней границей, верхняя сохраняется, пока она выше. */
+    const r = o.chReps ? o.reps : src.r;
+    const out = { w, r, done: base[i] ? base[i].done : false };
+    if (src.unit) out.unit = src.unit;
+    if (src.rmax && src.rmax > r) out.rmax = src.rmax;
+    return out;
   });
 }
 
