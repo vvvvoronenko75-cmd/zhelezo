@@ -120,7 +120,74 @@ function programDayAB(weeksCount = 12) {
       };
     }) });
   }
-  return { name: 'Дни A и B', startDate: iso(start), daysPerWeek: days.length, weeks };
+  return { name: 'Дни A и B', v: PROGRAM_V, startDate: iso(start), daysPerWeek: days.length, weeks };
+}
+
+
+/* ---------- Обновление сохранённой программы ----------
+   Программа лежит в устройстве вместе с отметками и весами, поэтому новая версия
+   приложения её не переписывает молча. Здесь — перенос: строится свежий план,
+   в него переносятся веса и отметки старого по названиям упражнений и датам.
+   Старые названия, изменённые по ходу правок, сопоставляются через ALIAS. */
+const PROGRAM_V = 2;
+const ALIAS = {
+  'разведения на плечи': 'разведения в наклоне',
+  'разведения': 'разведения в наклоне',
+  'горизонтальная тяга': 'горизонтальная тяга сидя',
+};
+const normName = n => {
+  const k = String(n || '').trim().toLowerCase();
+  return ALIAS[k] || k;
+};
+/* Наша ли это встроенная программа: обновлять чужую (созданную «Базу 5×5» или
+   переименованную вручную) нельзя — там может быть что угодно. */
+const isBuiltIn = p => !!p && /день a/i.test(p.weeks?.[0]?.days?.[0]?.title || '');
+const needsUpdate = () => isBuiltIn(state.program) && (state.program.v || 0) < PROGRAM_V;
+
+function migrateProgram() {
+  const old = state.program;
+  const fresh = programDayAB(old.weeks.length);
+  fresh.name = old.name && !/^день a/i.test(old.name) ? old.name : fresh.name;
+
+  /* Плоский указатель на старые упражнения: имя → { sets } (по всем дням, по датам) */
+  const byDate = {};
+  old.weeks.forEach(w => w.days.forEach(d => {
+    const m = byDate[d.date] || (byDate[d.date] = {});
+    d.exercises.forEach(e => { m[normName(e.name)] = e; });
+  }));
+  /* Веса могли задаваться в любой день — берём последний известный по каждому имени */
+  const lastW = {};
+  old.weeks.forEach(w => w.days.forEach(d => d.exercises.forEach(e => {
+    const w0 = e.sets?.[0]?.w;
+    if (w0 > 0) lastW[normName(e.name)] = w0;
+  })));
+
+  let keptDone = 0, keptW = 0;
+  fresh.weeks.forEach(w => w.days.forEach(d => {
+    const oldDay = byDate[d.date] || {};
+    d.exercises.forEach(ex => {
+      const parts = ex.parts || [ex.name];
+      const srcs = parts.map(n => oldDay[normName(n)]);
+      /* вес каждой части: из того же дня, иначе последний известный по имени */
+      const ws = parts.map((n, pi) => {
+        const v = srcs[pi]?.sets?.[0]?.w ?? lastW[normName(n)] ?? 0;
+        if (v > 0) keptW++;
+        return v;
+      });
+      ex.sets.forEach((st, si) => {
+        if (ex.parts) { st.ws = ws.slice(); st.w = ws[0]; } else { st.w = ws[0]; }
+        /* подход считается выполненным, если он был отмечен у всех частей строки */
+        const known = srcs.filter(Boolean);
+        if (known.length === parts.length && known.every(e => e.sets?.[si]?.done)) { st.done = true; keptDone++; }
+      });
+    });
+  }));
+
+  state.program = fresh;
+  state.ui.sel = findUpcoming(fresh);
+  state.ui.openWeek = 0; state.ui.editSet = null;
+  render(); scrollTop();
+  showToast(`Программа обновлена: перенесено отметок — ${keptDone}, весов — ${keptW}`);
 }
 
 /* ---------- Состояние ----------
@@ -412,7 +479,13 @@ function renderProgram() {
   }
   const axis = p.weeks.map((w, wi) => `<span class="lax">${axisIdx.has(wi) ? 'Н' + (wi + 1) : ''}</span>`).join('');
 
-  let html = `
+  let html = needsUpdate() ? `
+  <div class="card upd-card">
+    <div class="h2">Программа обновилась</div>
+    <div class="muted" style="margin:4px 0 10px">Суперсеты одной строкой, тройка плеч, вторая тренировка недели (День B) и уточнённые названия. Ваши отметки и подобранные веса перенесутся.</div>
+    <button class="btn" data-act="migrate">Обновить программу</button>
+  </div>` : '';
+  html += `
   <div class="card">
     <div class="prog-top">
       <div>
@@ -1123,6 +1196,7 @@ document.addEventListener('click', e => {
   else if (act === 'edit-ex') sheetEditExercise(+t.dataset.e);
   else if (act === 'add-ex') sheetAddExercise();
   else if (act === 'rename') sheetRename();
+  else if (act === 'migrate') migrateProgram();
   else if (act === 'new-program') sheetNewProgram();
   else if (act === 'save-name') { state.program.name = $('#f-name').value.trim() || state.program.name; closeSheet(); render(); }
   else if (act === 'del-ex') { delExercise(+t.dataset.e); }

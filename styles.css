@@ -489,3 +489,6 @@ canvas { width: 100%; height: auto; display: block; }
 /* Название суперсета — две половины пары, ему нужна вторая строка */
 .ex-card.in-ss .ex-name { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
 .ex-card.in-ss .ex-name .ss-tag { white-space: nowrap; }
+
+/* Предложение обновить сохранённую программу */
+.upd-card { border-color: rgba(255, 122, 47, .5); background: linear-gradient(180deg, rgba(255,122,47,.07), transparent), var(--card); }
