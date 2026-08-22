@@ -97,12 +97,24 @@ function programDayAB(weeksCount = 12) {
     { name: 'Плечи (жим + махи + разведения в наклоне)', parts: ['Жим', 'Махи', 'Разведения в наклоне'], sets: 3, r: 12, rmax: 15, rest: 60 },
     { name: 'Подъём на носки', sets: 3, r: 12, rmax: 20, rest: 60 },
   ];
-  const days = [{ title: 'День A', offset: 0, plan: planA }, { title: 'День B', offset: 3, plan: planB }];
+  const planC = [
+    { name: 'Румынская тяга', sets: 3, r: 8, rmax: 12, rest: 120 },
+    { name: 'Тяга вертикального блока + Жим гантелей', parts: ['Тяга вертикального блока', 'Жим гантелей'], sets: 3, r: 8, rmax: 12, rest: 90 },
+    { name: 'Пулловер с гантелью', sets: 3, r: 10, rmax: 15, rest: 60 },
+    { name: 'Махи в стороны + Тяга к лицу', parts: ['Махи в стороны', 'Тяга к лицу'], sets: 3, r: 12, rmax: 15, rest: 60 },
+    { name: 'Подъём на носки стоя', sets: 3, r: 12, rmax: 20, rest: 60 },
+  ];
+  /* Три тренировки в неделю через день: понедельник, среда, пятница */
+  const days = [
+    { title: 'День A', offset: 0, plan: planA },
+    { title: 'День B', offset: 2, plan: planB },
+    { title: 'День C', offset: 4, plan: planC },
+  ];
   const weeks = [];
   for (let w = 0; w < weeksCount; w++) {
     weeks.push({ days: days.map(d => {
       const date = new Date(start);
-      date.setDate(date.getDate() + w * 7 + d.offset); /* День A — понедельник, День B — четверг */
+      date.setDate(date.getDate() + w * 7 + d.offset); /* Пн / Ср / Пт */
       return {
         title: d.title,
         date: iso(date),
@@ -120,7 +132,7 @@ function programDayAB(weeksCount = 12) {
       };
     }) });
   }
-  return { name: 'Дни A и B', v: PROGRAM_V, startDate: iso(start), daysPerWeek: days.length, weeks };
+  return { name: 'Дни A, B и C', v: PROGRAM_V, startDate: iso(start), daysPerWeek: days.length, weeks };
 }
 
 
@@ -129,7 +141,7 @@ function programDayAB(weeksCount = 12) {
    приложения её не переписывает молча. Здесь — перенос: строится свежий план,
    в него переносятся веса и отметки старого по названиям упражнений и датам.
    Старые названия, изменённые по ходу правок, сопоставляются через ALIAS. */
-const PROGRAM_V = 2;
+const PROGRAM_V = 3;
 const ALIAS = {
   'разведения на плечи': 'разведения в наклоне',
   'разведения': 'разведения в наклоне',
@@ -147,24 +159,39 @@ const needsUpdate = () => isBuiltIn(state.program) && (state.program.v || 0) < P
 function migrateProgram() {
   const old = state.program;
   const fresh = programDayAB(old.weeks.length);
-  fresh.name = old.name && !/^день a/i.test(old.name) ? old.name : fresh.name;
+  /* Своё название владельца сохраняем; наши стандартные («День A (Пн)», «Дни A и B») обновляем на новое */
+  fresh.name = old.name && !/^(день a|дни a)/i.test(old.name) ? old.name : fresh.name;
 
-  /* Плоский указатель на старые упражнения: имя → { sets } (по всем дням, по датам) */
-  const byDate = {};
-  old.weeks.forEach(w => w.days.forEach(d => {
-    const m = byDate[d.date] || (byDate[d.date] = {});
-    d.exercises.forEach(e => { m[normName(e.name)] = e; });
+  /* Указатель на старые упражнения: неделя + буква дня → имя → упражнение.
+     Именно по букве, а не по дате: расписание могло сдвинуться (День B был
+     в четверг, стал в среду), и привязка к дате потеряла бы отметки. */
+  const byWeekDay = {};
+  old.weeks.forEach((w, wi) => w.days.forEach(d => {
+    const key = wi + '|' + dayLetter(d.title);
+    const m = byWeekDay[key] || (byWeekDay[key] = {});
+    d.exercises.forEach(e => {
+      m[normName(e.name)] = e;
+      /* Старый суперсет хранится одной строкой с общим именем — раскладываем его
+         на части, иначе новый план, ищущий по половинам, не найдёт ни весов, ни отметок */
+      (e.parts || []).forEach((pn, pi) => {
+        m[normName(pn)] = { sets: e.sets.map(st => ({ w: st.ws ? (st.ws[pi] || 0) : st.w, done: !!st.done })) };
+      });
+    });
   }));
   /* Веса могли задаваться в любой день — берём последний известный по каждому имени */
   const lastW = {};
   old.weeks.forEach(w => w.days.forEach(d => d.exercises.forEach(e => {
     const w0 = e.sets?.[0]?.w;
     if (w0 > 0) lastW[normName(e.name)] = w0;
+    (e.parts || []).forEach((pn, pi) => {
+      const pw = e.sets?.[0]?.ws?.[pi];
+      if (pw > 0) lastW[normName(pn)] = pw;
+    });
   })));
 
   let keptDone = 0, keptW = 0;
-  fresh.weeks.forEach(w => w.days.forEach(d => {
-    const oldDay = byDate[d.date] || {};
+  fresh.weeks.forEach((w, wi) => w.days.forEach(d => {
+    const oldDay = byWeekDay[wi + '|' + dayLetter(d.title)] || {};
     d.exercises.forEach(ex => {
       const parts = ex.parts || [ex.name];
       const srcs = parts.map(n => oldDay[normName(n)]);
@@ -482,7 +509,7 @@ function renderProgram() {
   let html = needsUpdate() ? `
   <div class="card upd-card">
     <div class="h2">Программа обновилась</div>
-    <div class="muted" style="margin:4px 0 10px">Суперсеты одной строкой, тройка плеч, вторая тренировка недели (День B) и уточнённые названия. Ваши отметки и подобранные веса перенесутся.</div>
+    <div class="muted" style="margin:4px 0 10px">Три тренировки в неделю (Пн · Ср · Пт), суперсеты одной строкой, тройка плеч, уточнённые названия. Ваши отметки и подобранные веса перенесутся.</div>
     <button class="btn" data-act="migrate">Обновить программу</button>
   </div>` : '';
   html += `
@@ -1128,18 +1155,18 @@ function sheetNewProgram() {
     <div class="muted" style="margin-bottom:10px">Текущая программа будет заменена вместе с отметками.</div>
     <div class="field"><label>Программа</label>
       <select id="f-kind">
-        <option value="dayA" selected>Дни A и B — суперсеты, 2 тренировки в неделю</option>
+        <option value="dayA" selected>Дни A, B и C — суперсеты, 3 тренировки в неделю</option>
         <option value="base55">База 5×5 — линейный рост весов</option>
       </select>
     </div>
-    <div class="field"><label>Название</label><input id="f-name" value="Дни A и B"></div>
+    <div class="field"><label>Название</label><input id="f-name" value="Дни A, B и C"></div>
     <div class="row">
       <div class="field"><label>Недель</label><input id="f-weeks" type="number" min="4" max="52" value="12"></div>
       <div class="field"><label>Дней в неделю</label>
         <select id="f-days"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select>
       </div>
     </div>
-    <div class="small" style="margin:-4px 0 10px">«Дней в неделю» действует только для «Базы 5×5»: в «Днях A и B» две тренировки — понедельник и четверг.</div>
+    <div class="small" style="margin:-4px 0 10px">«Дней в неделю» действует только для «Базы 5×5»: в «Днях A, B и C» три тренировки — понедельник, среда, пятница.</div>
     <button class="btn" data-act="create-program">Создать</button>`);
 }
 
