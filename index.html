@@ -47,6 +47,12 @@
    работает в зале без связи. Обновление подхватывается при следующем запуске. */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  /* Новая версия установилась и взяла страницу под управление — перезагружаемся
+     один раз, чтобы сразу показать свежий код, а не со следующего визита */
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return; reloaded = true; location.reload();
+  });
 }
 </script>
 </body>

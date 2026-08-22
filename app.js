@@ -2,6 +2,7 @@
 'use strict';
 
 const LS_KEY = 'zhelezo.v1';
+const APP_VER = '11'; /* растёт с каждой публикацией; показывается в шапке */
 const $ = sel => document.querySelector(sel);
 const DOW = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -377,6 +378,8 @@ function clampNum(raw, lo, hi, fallback, int) {
 const TITLES = { program: 'Программа', workout: 'Тренировка', calendar: 'Календарь', progress: 'Прогресс' };
 
 function render() {
+  const brand = $('#topbar-brand');
+  if (brand && !brand.dataset.ver) { brand.dataset.ver = '1'; brand.textContent = 'Железо · ' + APP_VER; }
   $('#topbar-title').textContent = TITLES[state.ui.tab];
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab === state.ui.tab));
   const el = $('#screen');
